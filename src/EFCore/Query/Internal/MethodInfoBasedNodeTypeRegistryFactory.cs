@@ -18,7 +18,11 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
     /// </summary>
     public class MethodInfoBasedNodeTypeRegistryFactory : INodeTypeProviderFactory
     {
+        private static readonly object _syncLock = new object();
         private readonly MethodInfoBasedNodeTypeRegistry _methodInfoBasedNodeTypeRegistry;
+        private readonly bool _quirkEnabled;
+
+        private volatile INodeTypeProvider[] _nodeTypeProviders;
 
         /// <summary>
         ///     Creates a new <see cref="MethodInfoBasedNodeTypeRegistryFactory" /> that will use the given
@@ -30,7 +34,16 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
         {
             Check.NotNull(methodInfoBasedNodeTypeRegistry, nameof(methodInfoBasedNodeTypeRegistry));
 
+            _quirkEnabled = AppContext.TryGetSwitch("Microsoft.EntityFrameworkCore.Issue12682", out var isEnabled)
+                && isEnabled;
+
             _methodInfoBasedNodeTypeRegistry = methodInfoBasedNodeTypeRegistry;
+
+            RegisterMethods(TrackingExpressionNode.SupportedMethods, typeof(TrackingExpressionNode));
+            RegisterMethods(IgnoreQueryFiltersExpressionNode.SupportedMethods, typeof(IgnoreQueryFiltersExpressionNode));
+            RegisterMethods(IncludeExpressionNode.SupportedMethods, typeof(IncludeExpressionNode));
+            RegisterMethods(StringIncludeExpressionNode.SupportedMethods, typeof(StringIncludeExpressionNode));
+            RegisterMethods(ThenIncludeExpressionNode.SupportedMethods, typeof(ThenIncludeExpressionNode));
         }
 
         /// <summary>
@@ -43,7 +56,18 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
             Check.NotNull(methods, nameof(methods));
             Check.NotNull(nodeType, nameof(nodeType));
 
-            _methodInfoBasedNodeTypeRegistry.Register(methods, nodeType);
+            if (_quirkEnabled)
+            {
+                _methodInfoBasedNodeTypeRegistry.Register(methods, nodeType);
+            }
+            else
+            {
+                lock (_syncLock)
+                {
+                    _methodInfoBasedNodeTypeRegistry.Register(methods, nodeType);
+                    _nodeTypeProviders = null;
+                }
+            }
         }
 
         /// <summary>
@@ -52,29 +76,34 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
         /// <returns>The <see cref="INodeTypeProvider" />.</returns>
         public virtual INodeTypeProvider Create()
         {
-            _methodInfoBasedNodeTypeRegistry
-                .Register(TrackingExpressionNode.SupportedMethods, typeof(TrackingExpressionNode));
-
-            _methodInfoBasedNodeTypeRegistry
-                .Register(IgnoreQueryFiltersExpressionNode.SupportedMethods, typeof(IgnoreQueryFiltersExpressionNode));
-
-            _methodInfoBasedNodeTypeRegistry
-                .Register(IncludeExpressionNode.SupportedMethods, typeof(IncludeExpressionNode));
-
-            _methodInfoBasedNodeTypeRegistry
-                .Register(StringIncludeExpressionNode.SupportedMethods, typeof(StringIncludeExpressionNode));
-
-            _methodInfoBasedNodeTypeRegistry
-                .Register(ThenIncludeExpressionNode.SupportedMethods, typeof(ThenIncludeExpressionNode));
-
-            var innerProviders
-                = new INodeTypeProvider[]
+            if (_quirkEnabled)
+            {
+                _nodeTypeProviders = new INodeTypeProvider[]
                 {
                     _methodInfoBasedNodeTypeRegistry,
                     MethodNameBasedNodeTypeRegistry.CreateFromRelinqAssembly()
                 };
+            }
+            else
+            {
+                if (_nodeTypeProviders == null)
+                {
+                    lock (_syncLock)
+                    {
+                        if (_nodeTypeProviders == null)
+                        {
+                            _nodeTypeProviders = new INodeTypeProvider[]
+                            {
+                            _methodInfoBasedNodeTypeRegistry,
+                            MethodNameBasedNodeTypeRegistry.CreateFromRelinqAssembly()
+                            };
+                        }
+                    }
+                }
 
-            return new CompoundNodeTypeProvider(innerProviders);
+            }
+
+            return new CompoundNodeTypeProvider(_nodeTypeProviders);
         }
     }
 }
