@@ -1,45 +1,9 @@
-queue:
-  name: DotNetCore-Windows
-  timeoutInMinutes: 60
-steps:
-- checkout: self
-  clean: true
-- script: sqllocaldb start
-  displayName: Start LocalDB
-- script: .\build.cmd -ci /bl:artifacts/logs/build.binlog /p:SkipTests=true
-- powershell: |
-    Invoke-WebRequest https://www.nuget.org/api/v2/package/xunit.runner.console/2.4.0 -OutFile xunit.zip;
-    Expand-Archive ./xunit.zip -DestinationPath obj/xunit/;
-    ./obj/xunit/tools/net461/xunit.console.exe ./test/EFCore.SqlServer.FunctionalTests/bin/Release/net461/Microsoft.EntityFrameworkCore.SqlServer.FunctionalTests.dll -verbose;
-    if ($LASTEXITCODE -ne 0) {
-      throw 'Tests failed'
-    }
-# - task: VSTest@2
-#   displayName: VsTest
-#   timeoutInMinutes: 10
-#   inputs:
-#     testAssemblyVer2: 'test\EFCore.SqlServer.FunctionalTests\bin\Release\net461\Microsoft.EntityFrameworkCore.SqlServer.FunctionalTests.dll'
-- task: PublishBuildArtifacts@1
-  displayName: Upload binlog
-  condition: always()
-  inputs:
-    artifactName: logs
-    artifactType: Container
-    pathtoPublish: artifacts/logs/
-- powershell: |
-   $all_Processes = gwmi win32_process -ComputerName . | select ProcessID,ParentProcessID,Description,@{l="Username";e={$_.getowner().user}},CommandLine | where{$_.Username -like $env:username}
-   write-host -f Magenta "------All------"
-   $all_Processes
-   $all_processIDs = $all_Processes.Processid
-   $parent_processIDs = $all_Processes.ParentProcessId
-   $gone = New-Object System.Collections.ArrayList
-   $parent_processIDs | Sort-Object -Unique | ForEach-Object {
-       if ($all_processIDs -notcontains $_)
-       {
-           $gone.Add($_) | Out-Null
-       }
-   }
-   write-host -f Magenta "------Orphaned------"
-   $all_Processes | Where-Object {$gone -contains $_.ParentProcessId} | ForEach-Object {$_}
-  displayName: List processes
-  condition: always()
+phases:
+- queue:
+    name: DotNetCore-Windows
+  steps:
+  - powershell: Get-WmiObject –class Win32_processor | select *
+- queue:
+    name: Hosted VS2017
+  steps:
+  - powershell: Get-WmiObject –class Win32_processor | select *
