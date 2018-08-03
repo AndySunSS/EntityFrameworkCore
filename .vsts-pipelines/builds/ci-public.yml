@@ -1,9 +1,11 @@
 phases:
-- queue:
+- phase: nonHosted
+  queue:
     name: DotNetCore-Windows
   steps:
   - powershell: Get-WmiObject –class Win32_processor | select *
-- queue:
+- phase: hosted
+  queue:
     name: Hosted VS2017
   steps:
   - powershell: Get-WmiObject –class Win32_processor | select *
